@@ -117,9 +117,8 @@ def generate_share_image(main_diagnosis, mbti, scores, elements):
     # ==========================================
     # 0. 配置部分 (DEPLOY时修改这里!)
     # ==========================================
-    # 这里填你部署后的 Streamlit App 真实网址
-    # 如果还没部署，先填一个占位符，等部署拿到链接后再改
-    SHARE_URL = "https://cybernj-demo.streamlit.app"
+    # 部署后的 Streamlit App 真实网址
+    SHARE_URL = "https://cybernj-2026.streamlit.app"
 
     # ----------------------------------
     # 1. 画布配置
