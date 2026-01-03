@@ -1,0 +1,377 @@
+import streamlit as st
+import pandas as pd
+import json
+import random
+import time
+import re
+import os
+from io import BytesIO
+
+# 导入我们的模块
+from logic_tcm import load_questions, calculate_scores, get_diagnosis_result
+from logic_mapping import predict_mbti
+from utils_viz import plot_radar, plot_bar, generate_share_image
+
+# ==========================================
+# 页面配置
+# ==========================================
+st.set_page_config(
+    page_title="赛博内经 Cyber NJ",
+    layout="wide",
+    page_icon="☯️",
+    initial_sidebar_state="expanded"
+)
+
+# ==========================================
+# CSS 样式
+# ==========================================
+st.markdown("""
+<style>
+    /* 滚动容器样式 */
+    .scrollable-container {
+        max-height: 500px;
+        overflow-y: auto;
+        padding: 20px;
+        border: 1px solid #f0f2f6;
+        border-radius: 10px;
+        background-color: #ffffff;
+        margin-bottom: 20px;
+    }
+    /* 隐藏 Radio 的 label */
+    .stRadio > label { display: none; }
+    /* 卡片样式 */
+    .stMetric {
+        background-color: #ffffff;
+        padding: 15px;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
+    /* 步骤卡片 */
+    .step-card {
+        background-color: #f9f9f9;
+        padding: 15px;
+        border-radius: 8px;
+        border-left: 5px solid #FF4B4B;
+        margin-bottom: 10px;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# ==========================================
+# Prompt
+# ==========================================
+FULL_SYSTEM_PROMPT = """
+【角色设定】
+你是一位资深的中医体质辨识专家，精通《中医体质分类与判定》国家标准。
+【任务】
+1. 通过对话判断用户的中医体质（9种体质之一或复合）。
+2. 根据"身心一元论"，推测该体质对应的 MBTI 人格类型。
+3. 在问诊结束时，必须输出一段严格的 JSON 代码用于系统可视化。
+
+【输出格式要求】
+当信息收集完毕后，请仅输出以下 JSON 数据块，不要包含 markdown 标记，格式如下：
+
+[[JSON_START]]
+{
+  "diagnosis_scores": {
+    "平和质": 20, "气虚质": 80, "阳虚质": 40, "阴虚质": 30, 
+    "痰湿质": 20, "湿热质": 10, "血瘀质": 10, "气郁质": 15, "特禀质": 5
+  },
+  "predicted_mbti": "ISFJ",
+  "five_elements": {
+    "木": 40, "火": 30, "土": 80, "金": 60, "水": 40
+  },
+  "analysis_summary": "你的气虚质特征明显，元气不足导致性格偏向内敛（I）..."
+}
+[[JSON_END]]
+"""
+
+
+# ==========================================
+# 辅助函数
+# ==========================================
+def parse_pasted_result(text):
+    try:
+        pattern = r"\[\[JSON_START\]\](.*?)\[\[JSON_END\]\]"
+        match = re.search(pattern, text, re.DOTALL)
+        if match:
+            json_str = match.group(1)
+        else:
+            start = text.find("{")
+            end = text.rfind("}") + 1
+            if start != -1 and end != -1:
+                json_str = text[start:end]
+            else:
+                return None, "未找到 JSON 数据格式，请确认 AI 输出正确。"
+        json_str = json_str.replace("```json", "").replace("```", "").strip()
+        data = json.loads(json_str)
+        return data, None
+    except Exception as e:
+        return None, f"解析出错: {str(e)}"
+
+
+# 🔥 新增：加载动画函数
+def simulate_loading_animation():
+    """
+    模拟赛博风格的加载过程
+    """
+    loading_texts = [
+        "📡 正在建立神经元与经络的连接...",
+        "🖐️ 赛博悬丝诊脉中，请保持呼吸平稳...",
+        "☯️ 正在解析您的阴阳虚实数据...",
+        "💊 神经网络正在抓取云端方剂...",
+        "🧠 正在由体质映射 MBTI 人格模型...",
+        "✅ 诊断完成，正在生成全息报告..."
+    ]
+
+    progress_bar = st.progress(0, text="启动赛博诊断程序...")
+
+    for percent_complete in range(100):
+        time.sleep(0.02)  # 调整速度
+        text_index = int(percent_complete / (100 / len(loading_texts)))
+        if text_index < len(loading_texts):
+            current_text = loading_texts[text_index]
+            progress_bar.progress(percent_complete + 1, text=current_text)
+
+    time.sleep(0.5)
+    progress_bar.empty()
+
+
+# ==========================================
+# 侧边栏
+# ==========================================
+with st.sidebar:
+    st.image("https://img.icons8.com/color/96/yin-yang.png", width=80)
+    st.title("赛博内经 Guide")
+    with st.expander("📖 量表测试操作流程", expanded=True):
+        st.markdown("""
+        **1. 问卷测试**
+        右侧填写 67 题，支持一键随机填充。
+
+        **2. 结果生成**
+        查看体质与 MBTI 映射图表。
+
+        **3. 分享海报**
+        生成带有二维码的诊断单。
+        """)
+    st.divider()
+    st.caption("""
+    © 2026 CyberNJ Team. All Rights Reserved.
+
+    Contact Us: spark_shi@tju.edu.cn
+    """)
+
+# ==========================================
+# 主页面逻辑
+# ==========================================
+st.title("🧬 赛博内经：AI 中医体质与 MBTI 分析系统")
+st.markdown("##### *Cyber NJ: An AI-Powered Approach to TCM Constitution & MBTI Profiling*")
+
+# 🔥 修改点 1：顶部免责声明
+st.warning(
+    "⚠️ 免责声明：本测试仅提供计算服务，测试结果仅供参考，在大规模评估和优化映射模型前不具备医学意义。如有不适，请咨询专业医师。")
+
+st.divider()
+
+if "tab1_result" not in st.session_state:
+    st.session_state.tab1_result = None
+
+tab1, tab2 = st.tabs(["📋 量表测评 (Standard Scale)", "🤖 AI 问诊 (Human-in-the-loop)"])
+
+# --------------------------------------------------------
+# TAB 1: 量表测评
+# --------------------------------------------------------
+with tab1:
+    col_info, col_btn = st.columns([3, 1])
+    with col_info:
+        st.info("💡 请在下方滚动窗口中完成 67 道题目。")
+    with col_btn:
+        # 随机填表功能
+        if st.button("🎲 随机一键填表", type="secondary"):
+            target_type_index = random.randint(0, 8)
+            base_answers = []
+            for _ in range(67):
+                if random.random() < 0.8:
+                    base_answers.append(random.randint(1, 2))
+                else:
+                    base_answers.append(3)
+
+            slices_indices = [(0, 7), (7, 15), (15, 23), (23, 31), (31, 38), (38, 45), (45, 52), (52, 59), (59, 67)]
+            start, end = slices_indices[target_type_index]
+            for i in range(start, end):
+                base_answers[i] = random.randint(4, 5)
+
+            for i in range(67):
+                st.session_state[f"q_{i}"] = base_answers[i]
+            st.rerun()
+
+    questions_df = load_questions()
+
+    if questions_df is not None:
+        with st.form("scale_form"):
+            # 使用原生容器，解决顶部空白问题
+            with st.container(height=500, border=True):
+                for idx, row in questions_df.iterrows():
+                    st.markdown(f"**{idx + 1}. {row['question']}**")
+                    st.radio(
+                        "选项", [1, 2, 3, 4, 5],
+                        captions=["没有", "很少", "有时", "经常", "总是"],
+                        horizontal=True,
+                        label_visibility="collapsed",
+                        key=f"q_{idx}"
+                    )
+                    st.divider()
+
+            submitted = st.form_submit_button("🚀 提交并分析", type="primary", width="stretch")
+
+        # 🟢 处理提交逻辑
+        if submitted:
+            # 🔥 修改点 2：调用加载动画
+            simulate_loading_animation()
+
+            answers_for_logic_tcm = []
+            answers_for_neural_net = []
+
+            for idx, row in questions_df.iterrows():
+                val = st.session_state.get(f"q_{idx}", 1)
+                answers_for_logic_tcm.append({
+                    "type": row['type'],
+                    "score": val,
+                    "direction": row.get('direction', 1)
+                })
+                answers_for_neural_net.append(int(val))
+
+            scores = calculate_scores(pd.DataFrame(answers_for_logic_tcm))
+            main_diagnosis = get_diagnosis_result(scores)
+
+            mbti, elements = predict_mbti(constitution_scores=scores, answers=answers_for_neural_net)
+
+            st.session_state.tab1_result = {
+                "scores": scores,
+                "main_diagnosis": main_diagnosis,
+                "mbti": mbti,
+                "elements": elements
+            }
+
+        # 🟢 结果展示区域
+        if st.session_state.tab1_result:
+            res = st.session_state.tab1_result
+            st.divider()
+            st.success("✅ 分析完成！Analysis Complete.")
+
+            k1, k2, k3 = st.columns(3)
+            k1.metric("主导体质", res["main_diagnosis"])
+            k2.metric("映射人格", res["mbti"])
+            k3.metric("五行特征", "复合型")
+
+            col_a, col_b = st.columns([1, 1])
+            with col_a:
+                st.subheader("📊 体质得分分布")
+                plot_bar(res["scores"])
+            with col_b:
+                st.subheader(f"🧠 MBTI人格映射：{res['mbti']} ")
+                img_path = f"assets/mbti/{res['mbti']}.png"
+                if os.path.exists(img_path):
+                    st.image(img_path, caption=f"MBTI Archetype: {res['mbti']}", width=200)
+                else:
+                    st.info(f"（提示：请在 assets/mbti/ 放入 {res['mbti']}.png 以显示图片）")
+                st.write("🌌 **五行能量雷达**")
+                plot_radar(res["elements"])
+
+            st.divider()
+            st.subheader("📤 生成诊断报告")
+            share_img = generate_share_image(res["main_diagnosis"], res["mbti"], res["scores"], res["elements"])
+            buf = BytesIO()
+            share_img.save(buf, format="PNG")
+
+            c_img, c_dl = st.columns([1, 2])
+            with c_img:
+                st.image(share_img, caption="预览图", width=150)
+            with c_dl:
+                st.download_button(
+                    label="💾 下载高清诊断单 (PNG)",
+                    data=buf.getvalue(),
+                    file_name=f"CyberNJ_Report_{res['mbti']}.png",
+                    mime="image/png",
+                    type="primary"
+                )
+
+# --------------------------------------------------------
+# TAB 2: AI 问诊
+# --------------------------------------------------------
+with tab2:
+    st.header("🤖 AI 问诊可视化工作台")
+    st.caption("Human-in-the-loop Workflow")
+    st.markdown('<div class="step-card"><h4>Step 1: 获取专家提示词</h4><p>复制下方代码块，发送给 AI。</p></div>',
+                unsafe_allow_html=True)
+    st.code(FULL_SYSTEM_PROMPT, language="json")
+
+    st.markdown('<div class="step-card"><h4>Step 2: 前往 AI 平台问诊</h4></div>', unsafe_allow_html=True)
+    c1, c2, c3 = st.columns(3)
+
+    with c1:
+        st.link_button("🚀 DeepSeek", "https://chat.deepseek.com", width="stretch")
+    with c2:
+        st.link_button("🌙 Kimi 智能", "https://kimi.moonshot.cn", width="stretch")
+    with c3:
+        st.link_button("🤖 ChatGPT", "https://chatgpt.com", width="stretch")
+
+    st.markdown('<div class="step-card"><h4>Step 3: 粘贴 AI 返回的诊断数据</h4></div>', unsafe_allow_html=True)
+
+    demo_json = """[[JSON_START]]
+{
+  "diagnosis_scores": {"平和质": 20, "气虚质": 85, "阳虚质": 60, "阴虚质": 30, "痰湿质": 20, "湿热质": 10, "血瘀质": 10, "气郁质": 15, "特禀质": 5},
+  "predicted_mbti": "ISFJ",
+  "five_elements": {"木": 30, "火": 20, "土": 90, "金": 60, "水": 30},
+  "analysis_summary": "用户主诉乏力..."
+}
+[[JSON_END]]"""
+
+    pasted_text = st.text_area("在此粘贴 (Ctrl+V)", height=150, value=demo_json)
+
+    if st.button("✨ 解析并可视化", type="primary", width="stretch"):
+        data, error = parse_pasted_result(pasted_text)
+        if error:
+            st.error(f"❌ {error}")
+        else:
+            st.success("✅ 数据解析成功！")
+            scores = data.get("diagnosis_scores", {})
+            mbti = data.get("predicted_mbti", "Unknown")
+            elements = data.get("five_elements", {})
+            summary = data.get("analysis_summary", "")
+            main_type = max(scores, key=scores.get) if scores else "未知"
+
+            k1, k2, k3 = st.columns(3)
+            k1.metric("AI 诊断体质", main_type)
+            k2.metric("映射人格", mbti)
+            k3.metric("五行特征", "复合型")
+
+            st.divider()
+            col_viz1, col_viz2 = st.columns(2)
+            with col_viz1:
+                st.subheader("📊 体质得分")
+                plot_bar(scores)
+            with col_viz2:
+                st.subheader("🕸️ 五行雷达")
+                plot_radar(elements)
+            st.info(f"📋 **AI 诊断摘要：** {summary}")
+
+# ==========================================
+# 🔥 修改点 3：参考文献
+# ==========================================
+st.divider()
+with st.expander("📚 参考文献与理论依据 (References & Theoretical Basis)"):
+    st.markdown("""
+    本系统的算法模型基于以下中医体质学与藏象学说经典文献构建：
+
+    1.  **王琦**. (2005). *中医体质学*. 北京: 人民卫生出版社.
+        * *依据：九种中医体质的分类标准、特征描述与判定逻辑。*
+    2.  **中华中医药学会**. (2009). *中医体质分类与判定 (ZYYXH/T157-2009)*.
+        * *依据：国家标准量表计分方法与阈值设定。*
+    3.  **孙广仁**. (2002). *中医基础理论*. 北京: 中国中医药出版社.
+        * *依据：五行（木火土金水）与五脏（肝心脾肺肾）的生理病理映射关系。*
+    4.  **张伯礼**. (2008). *中医内科学*. 北京: 人民卫生出版社.
+        * *依据：特定体质（如阳虚、气郁）与脏腑功能失调的病机关联。*
+
+    > **特别说明（叠甲）**: MBTI 映射部分基于"身心一元论"的探索性研究，结合了卷积神经网络的特征提取能力，旨在探索体质生理特征与心理人格特征的潜在关联，非传统中医理论的直接推论。
+    """)
