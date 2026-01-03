@@ -275,28 +275,36 @@ def generate_share_image(main_diagnosis, mbti, scores, elements):
     draw.text((cx - 70, cy + 180), "五行能量雷达", font=font_card_label, fill="#AAAAAA")
 
     # ----------------------------------
-    # 6. 完整体质得分列表
+    # 6. 完整体质得分列表 (修复溢出问题)
     # ----------------------------------
     list_y_start = 800
     draw.line([(40, list_y_start), (760, list_y_start)], fill="#EEEEEE", width=2)
     draw.text((40, list_y_start + 30), "完整体质得分 (Constitution Scores)", font=font_section, fill="#333333")
 
     sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-    col_1_x, col_2_x = 40, 440
+
+    # --- 布局参数调整 ---
+    col_1_x = 40
+    col_2_x = 430  # 原440 -> 改为430，稍微左移一点点
     row_height = 60
     table_start_y = list_y_start + 100
+
+    # 进度条最大宽度 (原160 -> 改为140，腾出空间给数字)
+    bar_max_w = 140
+    bar_h = 16
 
     for i, (name, val) in enumerate(sorted_scores):
         is_left = (i < 5)
         curr_x = col_1_x if is_left else col_2_x
         curr_y = table_start_y + (i if is_left else i - 5) * row_height
 
+        # 1. 体质名称
         name_color = "#000000" if i == 0 else "#666666"
         draw.text((curr_x, curr_y), name, font=font_list_name, fill=name_color)
 
+        # 2. 进度条 (位置调整)
         bar_x = curr_x + 110
         bar_y = curr_y + 10
-        bar_max_w, bar_h = 160, 16
 
         # 背景
         draw.rounded_rectangle([(bar_x, bar_y), (bar_x + bar_max_w, bar_y + bar_h)], radius=8, fill="#F2F2F2")
@@ -304,15 +312,25 @@ def generate_share_image(main_diagnosis, mbti, scores, elements):
         # 前景
         fill_color = "#FF4B4B" if val >= 60 else "#BBBBBB"
         if i == 0: fill_color = "#FF4B4B"
+
+        # 计算长度
         curr_w = int((val / 100) * bar_max_w)
         if curr_w < 8: curr_w = 8
         draw.rounded_rectangle([(bar_x, bar_y), (bar_x + curr_w, bar_y + bar_h)], radius=8, fill=fill_color)
 
-        # 分数
-        score_text = f"{val}"
-        draw.text((bar_x + bar_max_w + 15, curr_y - 2), score_text, font=font_list_score, fill="#333333")
-        draw.text((bar_x + bar_max_w + 15 + draw.textlength(score_text, font_list_score), curr_y + 4), "分",
-                  font=ImageFont.truetype(valid_font, 20), fill="#999999")
+        # 3. 分数数值 (关键修复：四舍五入 + 动态计算位置)
+        # 强制保留1位小数 (如 21.43 -> 21.4)，节省空间
+        val_str = f"{val:.1f}" if isinstance(val, float) else f"{val}"
+
+        # 数字位置：紧跟在进度条框的右边 + 10px 间距
+        score_x = bar_x + bar_max_w + 10
+
+        draw.text((score_x, curr_y - 2), val_str, font=font_list_score, fill="#333333")
+
+        # 4. "分"字位置：紧跟在数字后面
+        num_w = draw.textlength(val_str, font=font_list_score)
+        unit_font = ImageFont.truetype(valid_font, 20)  # 单独定义小字体
+        draw.text((score_x + num_w + 2, curr_y + 4), "分", font=unit_font, fill="#999999")
 
     # ----------------------------------
     # 7. 底部互动区域 (真实二维码 + 标语)
