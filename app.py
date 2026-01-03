@@ -5,9 +5,10 @@ import random
 import time
 import re
 import os
+import csv
+from datetime import datetime
 from io import BytesIO
 
-# 导入我们的模块
 from logic_tcm import load_questions, calculate_scores, get_diagnosis_result
 from logic_mapping import predict_mbti
 from utils_viz import plot_radar, plot_bar, generate_share_image
@@ -21,6 +22,77 @@ st.set_page_config(
     page_icon="☯️",
     initial_sidebar_state="expanded"
 )
+
+# ==========================================
+# 0. 数据持久化 & URL同步模块 (新增)
+# ==========================================
+DATA_FILE = "research_data.csv"
+ADMIN_PASSWORD = "admin2026"
+
+
+def init_csv_file():
+    """初始化数据文件"""
+    if not os.path.exists(DATA_FILE):
+        headers = [
+            "timestamp", "consent", "gender", "real_mbti",
+            "ai_mbti", "constitution_main",
+            "score_pinghe", "score_qixu", "score_yangxu", "score_yinxu",
+            "score_tanshi", "score_shire", "score_xueyu", "score_qiyu", "score_tebing",
+            "raw_answers_str"
+        ]
+        with open(DATA_FILE, mode='w', newline='', encoding='utf-8-sig') as f:
+            writer = csv.writer(f)
+            writer.writerow(headers)
+
+
+def save_research_data(consent, gender, real_mbti, ai_mbti, main_const, scores, answers_list):
+    """保存数据到本地 CSV"""
+    init_csv_file()
+
+    # 将答案列表压缩为字符串
+    answers_str = "".join([str(x) for x in answers_list])
+
+    row = [
+        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "Yes" if consent else "No",
+        gender if consent else "N/A",
+        real_mbti if consent else "N/A",
+        ai_mbti,
+        main_const,
+        scores.get("平和质", 0), scores.get("气虚质", 0), scores.get("阳虚质", 0),
+        scores.get("阴虚质", 0), scores.get("痰湿质", 0), scores.get("湿热质", 0),
+        scores.get("血瘀质", 0), scores.get("气郁质", 0), scores.get("特禀质", 0),
+        answers_str
+    ]
+
+    try:
+        with open(DATA_FILE, mode='a', newline='', encoding='utf-8-sig') as f:
+            writer = csv.writer(f)
+            writer.writerow(row)
+    except Exception as e:
+        st.error(f"数据保存失败: {e}")
+
+
+# --- URL 同步功能 (防丢失) ---
+def update_url_from_state():
+    """将答案同步到 URL 参数"""
+    ans_str = ""
+    for i in range(67):
+        ans_str += str(st.session_state.get(f"q_{i}", 1))
+    st.query_params["d"] = ans_str
+
+
+def load_state_from_url():
+    """从 URL 恢复答案"""
+    params = st.query_params
+    if "d" in params:
+        ans_str = params["d"]
+        if len(ans_str) == 67 and ans_str.isdigit():
+            for i, char in enumerate(ans_str):
+                st.session_state[f"q_{i}"] = int(char)
+            return True
+    return False
+
 
 # ==========================================
 # CSS 样式 (含移动端自适应)
@@ -171,11 +243,74 @@ def simulate_loading_animation():
 
 
 # ==========================================
+# 核心交互：数据收集弹窗 (Dialog) - 新增
+# ==========================================
+@st.dialog("🧬 数据捐赠计划 (Data Donation)")
+def show_consent_dialog(scores, main_diagnosis, mbti_pred, elements, answers_net):
+    st.markdown("""
+    **您是否愿意将本次匿名测试数据提供给后续课题研究？**
+
+    您的贡献将帮助我们要优化【中医体质-MBTI映射模型】的准确率。
+    *所有信息均严格保密，仅用于学术统计。*
+    """)
+
+    st.warning("⚠️ 如果本次测试使用的是【随机一键填表】，请务必选择「不参与」或「拒绝」。")
+
+    # 意愿选择
+    consent = st.radio("您的意愿：", ["愿意参与研究", "仅查看结果，不参与"], index=0)
+
+    gender = "保密"
+    real_mbti = "Unknown"
+
+    if consent == "愿意参与研究":
+        c1, c2 = st.columns(2)
+        with c1:
+            gender = st.selectbox("您的性别", ["男", "女"], index=0)
+        with c2:
+            mbti_options = ["不清楚", "ISTJ", "ISFJ", "INFJ", "INTJ", "ISTP", "ISFP", "INFP", "INTP",
+                            "ESTP", "ESFP", "ENFP", "ENTP", "ESTJ", "ESFJ", "ENFJ", "ENTJ"]
+            real_mbti = st.selectbox("您真实的 MBTI (如有)", mbti_options, index=0)
+
+    st.divider()
+
+    if st.button("确认并查看报告", type="primary", use_container_width=True):
+        # 1. 保存数据
+        is_willing = (consent == "愿意参与研究")
+        save_research_data(
+            consent=is_willing,
+            gender=gender,
+            real_mbti=real_mbti,
+            ai_mbti=mbti_pred,
+            main_const=main_diagnosis,
+            scores=scores,
+            answers_list=answers_net
+        )
+
+        # 2. 将结果存入 session 并关闭弹窗
+        st.session_state.tab1_result = {
+            "scores": scores,
+            "main_diagnosis": main_diagnosis,
+            "mbti": mbti_pred,
+            "elements": elements
+        }
+        st.rerun()
+
+
+# ==========================================
+# 初始化逻辑 - 新增
+# ==========================================
+if "data_loaded" not in st.session_state:
+    if load_state_from_url():
+        st.toast("已恢复上次填写进度", icon="📂")
+    st.session_state.data_loaded = True
+
+# ==========================================
 # 侧边栏
 # ==========================================
 with st.sidebar:
     st.image("https://img.icons8.com/color/96/yin-yang.png", width=80)
     st.title("赛博内经 Guide")
+
     with st.expander("📖 量表测试操作流程", expanded=True):
         st.markdown("""
         **1. 问卷测试**
@@ -188,6 +323,22 @@ with st.sidebar:
         生成带有二维码的诊断单。
         """)
     st.divider()
+
+    # 🔥 管理员数据下载通道 (仅在有密码时显示)
+    with st.expander("🔐 管理员模式 (Admin)"):
+        pwd = st.text_input("输入管理员密码", type="password")
+        if pwd == ADMIN_PASSWORD:
+            if os.path.exists(DATA_FILE):
+                with open(DATA_FILE, "r", encoding="utf-8-sig") as f:
+                    st.download_button(
+                        label="📥 下载收集的数据 (CSV)",
+                        data=f,
+                        file_name=f"research_data_{datetime.now().strftime('%Y%m%d')}.csv",
+                        mime="text/csv"
+                    )
+            else:
+                st.warning("暂无数据文件")
+
     st.caption("""
     © 2026 CyberNJ Team. All Rights Reserved.
 
@@ -245,6 +396,9 @@ with tab1:
 
             for i in range(67):
                 st.session_state[f"q_{i}"] = base_answers[i]
+
+            # 🔥 随机填表后也更新 URL
+            update_url_from_state()
             st.rerun()
 
     questions_df = load_questions()
@@ -268,6 +422,9 @@ with tab1:
 
         # 🟢 处理提交逻辑
         if submitted:
+            # 🔥 1. 先把当前进度同步到 URL (防止此时用户刷新丢失)
+            update_url_from_state()
+
             # 调用加载动画
             simulate_loading_animation()
 
@@ -288,12 +445,8 @@ with tab1:
 
             mbti, elements = predict_mbti(constitution_scores=scores, answers=answers_for_neural_net)
 
-            st.session_state.tab1_result = {
-                "scores": scores,
-                "main_diagnosis": main_diagnosis,
-                "mbti": mbti,
-                "elements": elements
-            }
+            # 🔥 触发弹窗 (而不是直接设置 session_state.tab1_result)
+            show_consent_dialog(scores, main_diagnosis, mbti, elements, answers_for_neural_net)
 
         # 🟢 结果展示区域
         if st.session_state.tab1_result:
