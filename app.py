@@ -23,15 +23,18 @@ st.set_page_config(
 )
 
 # ==========================================
-# CSS 样式
+# CSS 样式 (含移动端自适应)
 # ==========================================
 st.markdown("""
 <style>
+    /* =================================
+       1. PC端基础样式
+       ================================= */
     /* 滚动容器样式 */
     .scrollable-container {
         max-height: 500px;
         overflow-y: auto;
-        padding: 20px;
+        padding: 5px 20px 20px 20px;
         border: 1px solid #f0f2f6;
         border-radius: 10px;
         background-color: #ffffff;
@@ -53,6 +56,36 @@ st.markdown("""
         border-radius: 8px;
         border-left: 5px solid #FF4B4B;
         margin-bottom: 10px;
+    }
+
+    /* =================================
+       2. 移动端自适应 (Mobile Responsive)
+       ================================= */
+    @media only screen and (max-width: 600px) {
+        /* 缩小大标题 */
+        h1 {
+            font-size: 1.8rem !important;
+        }
+        /* 缩小副标题 */
+        h3 {
+            font-size: 1.2rem !important;
+        }
+        /* 调整 Metric 指标卡字体 */
+        div[data-testid="stMetricValue"] {
+            font-size: 1.2rem !important;
+        }
+        div[data-testid="stMetricLabel"] {
+            font-size: 0.9rem !important;
+        }
+        /* 调整按钮大小，手机上撑满宽度 */
+        button {
+            width: 100% !important; 
+        }
+        /* 调整左右边距，防止内容贴边 */
+        .block-container {
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
+        }
     }
 </style>
 """, unsafe_allow_html=True)
@@ -110,7 +143,7 @@ def parse_pasted_result(text):
         return None, f"解析出错: {str(e)}"
 
 
-# 🔥 新增：加载动画函数
+# 加载动画函数
 def simulate_loading_animation():
     """
     模拟赛博风格的加载过程
@@ -164,10 +197,19 @@ with st.sidebar:
 # ==========================================
 # 主页面逻辑
 # ==========================================
+# 🔥 移动端 引导提示
+with st.expander("📱 手机用户必读 (点击展开)", expanded=True):
+    st.warning("""
+    **⚠️ 如果您正在使用微信、小红书、QQ等应用的内置浏览器：**
+    **图片下载可能失败，AI链接无法跳转**
+
+    👉 **解决方案**：请点击屏幕右上角的 **[...]**，选择 **"在浏览器打开"**，即可获得完整体验。
+    """)
+
 st.title("🧬 赛博内经：AI 中医体质与 MBTI 分析系统")
 st.markdown("##### *Cyber NJ: An AI-Powered Approach to TCM Constitution & MBTI Profiling*")
 
-# 🔥 修改点 1：顶部免责声明
+# 顶部免责声明
 st.warning(
     "⚠️ 免责声明：本测试仅提供计算服务，测试结果仅供参考，在大规模评估和优化映射模型前不具备医学意义。如有不适，请咨询专业医师。")
 
@@ -226,7 +268,7 @@ with tab1:
 
         # 🟢 处理提交逻辑
         if submitted:
-            # 🔥 修改点 2：调用加载动画
+            # 调用加载动画
             simulate_loading_animation()
 
             answers_for_logic_tcm = []
@@ -295,6 +337,8 @@ with tab1:
                     mime="image/png",
                     type="primary"
                 )
+                # 🔥 新增提示：下载失败处理
+                st.caption("⚠️ 点下载没反应？请点击右上角[...]选择「在浏览器打开」")
 
 # --------------------------------------------------------
 # TAB 2: AI 问诊
@@ -307,6 +351,10 @@ with tab2:
     st.code(FULL_SYSTEM_PROMPT, language="json")
 
     st.markdown('<div class="step-card"><h4>Step 2: 前往 AI 平台问诊</h4></div>', unsafe_allow_html=True)
+
+    # 🔥 新增提示：外链失败处理
+    st.caption("⚠️ 如点击下方按钮无反应，请复制链接到浏览器访问，或使用「在浏览器打开」功能。")
+
     c1, c2, c3 = st.columns(3)
 
     with c1:
@@ -357,7 +405,7 @@ with tab2:
             st.info(f"📋 **AI 诊断摘要：** {summary}")
 
 # ==========================================
-# 🔥 修改点 3：参考文献
+# 参考文献
 # ==========================================
 st.divider()
 with st.expander("📚 参考文献与理论依据 (References & Theoretical Basis)"):

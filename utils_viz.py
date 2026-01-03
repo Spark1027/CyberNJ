@@ -359,7 +359,7 @@ def generate_share_image(main_diagnosis, mbti, scores, elements):
 
     # 免责声明
     disclaimer_y = slogan_y + 100
-    disclaimer_text = "⚠️ 声明：本测试结果仅供娱乐参考，不作为医学诊断依据。\n如有身体不适，请前往正规医院就诊。"
+    disclaimer_text = "声明：本测试结果未经医学论证，无临床诊断意义。\n如有身体不适，请前往正规医院就诊。"
     draw.text((text_left_x, disclaimer_y), disclaimer_text, font=font_disclaimer, fill="#999999", spacing=6)
 
     # 版权信息
